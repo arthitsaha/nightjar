@@ -33,6 +33,25 @@ Global hotkeys and synthetic keystrokes are privileged on macOS. In
 
 Then restart that app. Without these the hotkey silently never fires.
 
+### Platform status
+
+Nightjar is developed and used daily on **Windows**. The macOS paths — Right
+Option as the hotkey, `Cmd+V` injection, the permissions above — are written and
+believed correct, but are **not yet confirmed by a report from a Mac**. Every
+dependency supports the platform: `onnx-asr` states it "works on Windows, Linux,
+and macOS on x86 and Arm CPUs", `sounddevice` and `pyperclip` are cross-platform,
+and Ollama ships a native macOS build.
+
+If you run it on a Mac, `selftest.py` is the quickest check — it loads the model
+and times one inference:
+
+```bash
+.venv/bin/python selftest.py
+```
+
+An issue reporting either success or failure, with your macOS version and chip,
+is genuinely useful.
+
 ## Running it
 
 | | Windows | macOS / Linux |
@@ -88,7 +107,7 @@ throwaway worker thread guarded by a `busy` lock, so a second key press during
 processing is ignored rather than queued. Everything the UI shows arrives
 through one `queue.Queue`, so no worker ever touches Tk directly.
 
-### Measured on the dev machine (Ryzen 5 4600H, GTX 1650 Ti)
+### Performance
 
 | | |
 |---|---|
@@ -96,7 +115,11 @@ through one `queue.Queue`, so no worker ever touches Tk directly.
 | STT, 2 s / 5 s audio | 237 ms / 496 ms (8–10× realtime) |
 | LLM cleanup | ~580 ms median |
 | **Full dictation** | **~0.8 s** for a short phrase |
-| GPU use | 2.2 GB / 4 GB |
+| **Total VRAM** | **~2.2 GB** |
+
+All 2.2 GB is the cleanup model — 1.9 GB of weights plus its KV cache, held in
+VRAM between dictations by `keep_alive`. Speech recognition runs on the CPU and
+uses no VRAM at all. Timings are from a Ryzen 5 4600H / GTX 1650 Ti.
 
 ### Why these choices
 
@@ -115,6 +138,36 @@ questions instead of punctuating them, and swapped words.
 **No rule-based cleanup** — the LLM does all filler removal, punctuation,
 capitalization, spoken punctuation, and self-corrections. If Ollama is
 unreachable you get the raw transcript rather than an error.
+
+## If you have less VRAM (Windows)
+
+The 2.2 GB figure is entirely the cleanup model, so every lever below trades
+cleanup quality or speed for VRAM. Transcription is unaffected — it is on the
+CPU either way, and a machine with no discrete GPU at all can still run Nightjar.
+
+Nothing here needs a code change; edit `config.json`.
+
+| If you have | Do this | Cost |
+|---|---|---|
+| **~2 GB** | Nothing. Ollama fits what it can and runs the remaining layers on the CPU. | Cleanup slows to roughly 1–2 s. |
+| **~1.5 GB** | `"model": "qwen2.5:1.5b-instruct-q4_K_M"` (986 MB) | Real quality loss — see the warning below. |
+| **~1 GB** | `"keep_alive": "0"` alongside the 1.5b model — VRAM is released after each dictation instead of held. | Adds a 1–3 s model reload to *every* dictation. |
+| **None** | `"enabled": false` in `"llm"`, or run with `--no-llm` | 0 VRAM, 0 cleanup: raw transcripts, no punctuation or filler removal. |
+
+To keep the 3B model's quality with no GPU at all, hide the GPU from the Ollama
+server (`CUDA_VISIBLE_DEVICES=` in its environment) and let it run on CPU and
+system RAM. It needs about 2.5 GB of RAM and cleanup lands around 2–4 s per
+dictation — slow for push-to-talk, but the text quality is identical.
+
+> **The 1.5b downgrade is not free.** It was measured and rejected as the
+> default for the reasons in *Why these choices* above: it inverted meanings
+> ("cc sarah" → "No need for Sarah this time"), answered dictated questions
+> instead of punctuating them, and swapped words. A swapped word is worse than
+> no cleanup at all, so if you are choosing between 1.5b and `--no-llm`, try
+> `--no-llm` first and see whether raw Parakeet output is good enough. It often is.
+
+`qwen2.5:0.5b-instruct-q4_K_M` (398 MB) exists and will load, but it is not
+worth trying — at that size the model rewrites more than it punctuates.
 
 ## If transcription quality is poor
 
