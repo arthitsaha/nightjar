@@ -718,11 +718,18 @@ class Overlay:
             except Exception:
                 pass
         elif IS_MAC:
+            # Setting the attribute can succeed while the window stays opaque,
+            # so read it back and confirm the colour name actually resolves
+            # before trusting it. Otherwise the blob is a solid square card.
             try:
                 self.root.attributes("-transparent", True)
-                return "systemTransparent"
-            except Exception:
-                pass
+                if self.root.attributes("-transparent"):
+                    self.root.winfo_rgb("systemTransparent")
+                    Log.dim("  ui   macOS transparent window")
+                    return "systemTransparent"
+                Log.dim("  ui   macOS ignored -transparent, drawing a card instead")
+            except Exception as exc:
+                Log.dim(f"  ui   macOS transparency unavailable ({exc}) - drawing a card")
 
         # No compositing available: a small dark card, slightly see-through.
         try:
@@ -1074,6 +1081,51 @@ class WindowsHotkeys(BaseHotkeys):
             pass
 
 
+def _patch_ax_is_process_trusted() -> None:
+    """
+    Work around pynput's listener dying on macOS with
+
+        KeyError: 'AXIsProcessTrusted'
+
+    pynput calls `HIServices.AXIsProcessTrusted()` on its listener thread to
+    find out whether it is a trusted accessibility client. HIServices is a
+    pyobjc lazy module, and on newer pyobjc builds that symbol fails to resolve
+    through the lazy loader, raising KeyError out of `funcmap.pop(name)`. It is
+    raised on the listener thread, so the app looks like it started fine and
+    then simply never reacts to the hotkey.
+
+    The function is a plain C call with no arguments, so binding it directly out
+    of ApplicationServices with ctypes sidesteps the lazy loader entirely.
+    """
+    if not IS_MAC:
+        return
+    try:
+        from pynput._util import darwin as pynput_darwin
+    except Exception:
+        return
+
+    services = getattr(pynput_darwin, "HIServices", None)
+    if services is None:
+        return
+    try:
+        services.AXIsProcessTrusted()
+        return  # pyobjc resolved it fine; nothing to patch
+    except Exception:
+        pass
+
+    try:
+        import ctypes.util
+
+        path = ctypes.util.find_library("ApplicationServices")
+        fn = ctypes.cdll.LoadLibrary(path).AXIsProcessTrusted
+        fn.restype = ctypes.c_bool
+        fn.argtypes = []
+        services.AXIsProcessTrusted = fn
+        Log.dim("  fix  bound AXIsProcessTrusted via ctypes (pyobjc lazy import failed)")
+    except Exception as exc:
+        Log.warn(f"could not bind AXIsProcessTrusted ({exc}) - the hotkey may not fire")
+
+
 class PynputHotkeys(BaseHotkeys):
     """
     macOS and Linux backend.
@@ -1100,6 +1152,7 @@ class PynputHotkeys(BaseHotkeys):
         super().__init__(spec, on_start, on_stop)
         from pynput import keyboard as pk
 
+        _patch_ax_is_process_trusted()
         self.pk = pk
         self.listener = None
         self.quit_listener = None
@@ -1133,6 +1186,16 @@ class PynputHotkeys(BaseHotkeys):
         )
         self.listener.daemon = True
         self.listener.start()
+
+        # The listener owns its own thread, so anything that kills it during
+        # startup leaves the app looking perfectly healthy while the hotkey
+        # never fires. Give it a moment and say so if it is already gone.
+        self.listener.join(0.4)
+        if not self.listener.is_alive():
+            Log.warn("the hotkey listener stopped immediately - dictation will not trigger")
+            if IS_MAC:
+                Log.dim("  grant Accessibility and Input Monitoring to this terminal,")
+                Log.dim("  then quit and reopen it - the permission is read at startup")
 
     def stop(self) -> None:
         for listener in (self.listener, self.quit_listener):

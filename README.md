@@ -66,24 +66,39 @@ Then restart that app. Without these the hotkey silently never fires.
 
 Nightjar is developed and used daily on **Windows**.
 
-On **macOS**, the installer is confirmed working on a MacBook Pro: the venv,
-every dependency, and the 661 MB speech model all install and warm correctly.
-What is still unconfirmed is the *running* app — Right Option as the hotkey,
-`Cmd+V` injection, and the overlay. Reports welcome.
+On **macOS** it installs and starts on a MacBook Pro. The speech model loads
+through CoreML in ~5.6 s, the mic is captured at 48 kHz and resampled, and Right
+Option binds correctly. Dictation end-to-end is still unconfirmed, and the
+overlay has a known cosmetic problem — see below.
 
 While the model warms, macOS prints a wall of `Context leak detected,
 CoreAnalytics returned false`. That is system-framework noise, not Nightjar
-failing; the install continues normally underneath it.
+failing; startup continues normally underneath it.
 
-If you run it on a Mac, `selftest.py` is the quickest check — it loads the model
-and times one inference:
+### Known macOS issues
+
+**The blob may draw as a plain square.** Tk on macOS has no colour-key
+transparency, and where the transparent-window attribute doesn't take effect the
+overlay falls back to a small dark card. Startup logs which path it took
+(`ui   macOS transparent window`, or a line explaining why not). Set
+`"overlay": false` in `config.json` to turn it off entirely.
+
+**`KeyError: 'AXIsProcessTrusted'` on the listener thread.** pynput asks macOS
+whether it is a trusted accessibility client, and on newer pyobjc builds that
+lookup fails through the lazy loader — killing the hotkey while the app looks
+like it started fine. Nightjar now binds the symbol itself, so this should not
+appear; if it does, please open an issue with your Python and pyobjc versions.
+
+**Cleanup silently off.** `Ollama unavailable ... Connection refused` means the
+Ollama server isn't running — the menu-bar app isn't started, or it's still
+installing. Dictation still works, it just pastes raw transcripts.
+
+`selftest.py` is the quickest health check — it loads the model and times one
+inference:
 
 ```bash
 .venv/bin/python selftest.py
 ```
-
-An issue reporting either success or failure, with your macOS version and chip,
-is genuinely useful.
 
 ## Running it
 
