@@ -208,7 +208,10 @@ def verify() -> None:
     mods = ["onnx_asr", "sounddevice", "numpy", "pyperclip", "requests", "soundfile", "soxr"]
     mods.append("keyboard" if IS_WIN else "pynput")
     code = (
-        "import importlib, sys\n"
+        # importlib.util must be imported explicitly - `import importlib` alone
+        # does not bind the submodule, and whether it happens to be there
+        # already varies by platform and Python build.
+        "import importlib.util\n"
         f"bad = [m for m in {mods!r} if not importlib.util.find_spec(m)]\n"
         "print('MISSING:' + ','.join(bad) if bad else 'ALL_OK')\n"
     )

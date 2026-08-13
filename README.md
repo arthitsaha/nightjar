@@ -45,12 +45,16 @@ Then restart that app. Without these the hotkey silently never fires.
 
 ### Platform status
 
-Nightjar is developed and used daily on **Windows**. The macOS paths — Right
-Option as the hotkey, `Cmd+V` injection, the permissions above — are written and
-believed correct, but are **not yet confirmed by a report from a Mac**. Every
-dependency supports the platform: `onnx-asr` states it "works on Windows, Linux,
-and macOS on x86 and Arm CPUs", `sounddevice` and `pyperclip` are cross-platform,
-and Ollama ships a native macOS build.
+Nightjar is developed and used daily on **Windows**.
+
+On **macOS**, the installer is confirmed working on a MacBook Pro: the venv,
+every dependency, and the 661 MB speech model all install and warm correctly.
+What is still unconfirmed is the *running* app — Right Option as the hotkey,
+`Cmd+V` injection, and the overlay. Reports welcome.
+
+While the model warms, macOS prints a wall of `Context leak detected,
+CoreAnalytics returned false`. That is system-framework noise, not Nightjar
+failing; the install continues normally underneath it.
 
 If you run it on a Mac, `selftest.py` is the quickest check — it loads the model
 and times one inference:
