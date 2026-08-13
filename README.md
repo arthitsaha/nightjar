@@ -274,8 +274,10 @@ Getting there takes a different toolkit on each OS. Windows uses Tk with a
 colour-key transparent window plus `WS_EX_TRANSPARENT | WS_EX_NOACTIVATE`. Tk on
 macOS can do neither — hence the solid square earlier builds drew there — so
 macOS uses a borderless `NSPanel` through pyobjc instead, with
-`setIgnoresMouseEvents_` for click-through and an accessory activation policy so
-it never becomes the active app. Both renderers share the same blob maths, so
+`setIgnoresMouseEvents_` for click-through, an accessory activation policy so it
+never becomes the active app, and `setHidesOnDeactivate_(False)` — panels hide
+themselves whenever their app goes inactive, and an app that never activates
+never gets them back. Both renderers share the same blob maths, so
 the motion is identical; only the painting differs. If AppKit is unavailable,
 it falls back to Tk and says so.
 

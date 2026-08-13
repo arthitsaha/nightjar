@@ -1100,10 +1100,19 @@ class CocoaOverlay(BlobBase):
 
         self.panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             rect,
-            getattr(AppKit, "NSWindowStyleMaskBorderless", 0),
+            getattr(AppKit, "NSWindowStyleMaskBorderless", 0)
+            # The panel must never make Nightjar the active application, which
+            # is exactly what this mask is for.
+            | getattr(AppKit, "NSWindowStyleMaskNonactivatingPanel", 1 << 7),
             getattr(AppKit, "NSBackingStoreBuffered", 2),
             False,
         )
+        # NSPanel overrides hidesOnDeactivate to YES, unlike NSWindow: panels
+        # are pulled off screen while their app is inactive and put back when
+        # it activates again. Nightjar is an accessory app that never becomes
+        # active, so "again" never arrives - click any other window and the
+        # blob vanishes for good. This one line is what keeps it on screen.
+        self.panel.setHidesOnDeactivate_(False)
         self.panel.setOpaque_(False)
         self.panel.setBackgroundColor_(NSColor.clearColor())
         self.panel.setHasShadow_(False)
