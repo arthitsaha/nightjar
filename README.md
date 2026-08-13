@@ -51,6 +51,23 @@ transcripts instead of cleaned-up ones.
 | `--no-models` | skip the model downloads |
 | `--recreate` | rebuild `.venv` from scratch |
 
+### Updating
+
+```bash
+update.bat        # Windows
+./update.sh       # macOS / Linux
+```
+
+You don't need git for this. In a clone it runs `git pull`; in a folder that
+came from the ZIP — or on a machine with no git at all — it fetches the same
+update as a ZIP and unpacks it over the top. Either way it prints what changed,
+and `--check` shows that without writing anything.
+
+**Your `config.json` is never overwritten.** If the shipped defaults change, the
+new version lands beside yours as `config.json.new` to compare — once, not on
+every update. `.venv` is left alone too, and you'll be told when dependencies
+changed and the installer needs re-running.
+
 ### macOS needs two permissions
 
 Global hotkeys and synthetic keystrokes are privileged on macOS. In
@@ -322,6 +339,7 @@ Every fix cost word fidelity, so it was left alone deliberately.
 | `nightjar.py` | The whole app — capture, STT, cleanup, injection, overlay, hotkeys |
 | `config.json` | Everything tunable |
 | `install.py` | Venv, dependencies, model downloads (`install.bat` / `install.sh` wrap it) |
+| `update.py` | Pulls the latest, with or without git (`update.bat` / `update.sh` wrap it) |
 | `diagnose.py` | One recording through four pipelines, for quality problems |
 | `selftest.py` | Model load and inference speed on this machine |
 | `probe_fn.py` | Prints the scan code your Fn key emits, if any (Windows) |
