@@ -1,0 +1,23 @@
+# virtualenv
+.venv/
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# diagnostic output
+diagnose_capture.wav
+*.wav
+
+# unrelated local scripts kept in this folder
+wifi-monitor.ps1
+wifi-monitor-logs/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

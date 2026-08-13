@@ -1,0 +1,16 @@
+# install.py installs these into .venv for you; this file is for pip users.
+#   pip install -r requirements.txt
+#
+# Windows/Linux also need `keyboard`; macOS/Linux need `pynput`.
+# install.py picks the right one per platform.
+
+onnx-asr[cpu,hub]
+sounddevice
+numpy
+pyperclip
+requests
+soundfile
+soxr
+
+keyboard; sys_platform == "win32"
+pynput; sys_platform != "win32"

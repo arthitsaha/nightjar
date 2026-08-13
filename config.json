@@ -1,0 +1,41 @@
+{
+  "hotkey": {
+    "mode": "hold",
+    "key": "right ctrl",
+    "key_mac": "right option",
+    "scan_code": null,
+    "_comment": "mode: 'hold' (push-to-talk) or 'toggle'. 'key' is used on Windows/Linux, 'key_mac' on macOS (most Mac keyboards have no Right Ctrl). scan_code is Windows-only: if probe_fn.py shows your Fn key emitting a code, put it here and set key to null."
+  },
+
+  "stt": {
+    "model": "nemo-parakeet-tdt-0.6b-v2",
+    "quantization": "int8",
+    "device": "cpu",
+    "sample_rate": 16000,
+    "resample": "auto",
+    "min_duration_sec": 0.35
+  },
+
+  "llm": {
+    "enabled": true,
+    "host": "http://127.0.0.1:11434",
+    "model": "qwen2.5:3b-instruct-q4_K_M",
+    "keep_alive": "30m",
+    "timeout_sec": 20,
+    "temperature": 0,
+    "max_tokens": 512,
+    "fallback_to_raw": true
+  },
+
+  "output": {
+    "method": "paste",
+    "restore_clipboard": true,
+    "trailing_space": true
+  },
+
+  "ui": {
+    "overlay": true,
+    "scale": 0.62,
+    "sounds": true
+  }
+}
