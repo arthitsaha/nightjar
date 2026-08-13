@@ -7,6 +7,16 @@ No account, no cloud, no audio ever leaves the computer.
 
 ## Install
 
+Get the code, then run the installer for your OS from inside that folder:
+
+```bash
+git clone https://github.com/arthitsaha/nightjar.git
+cd nightjar
+```
+
+No git? Click the green **Code** button at the top of this page → **Download ZIP**,
+unzip it, and open a terminal in the unzipped folder.
+
 ```bash
 # Windows
 install.bat
