@@ -26,11 +26,30 @@ chmod +x install.sh run.sh
 ./install.sh
 ```
 
-That creates an isolated `.venv`, installs the right dependencies for your OS,
-pulls the cleanup model into Ollama, and pre-downloads the speech model so your
-first dictation isn't racing a 600 MB download.
+All you need beforehand is **Python 3.9+**. The installer handles the rest: an
+isolated `.venv`, the right dependencies for your OS, **Ollama itself if you
+don't already have it**, the cleanup model pulled into it, and the speech model
+pre-downloaded so your first dictation isn't racing a 600 MB download.
 
-Flags: `--no-models` skips downloads, `--recreate` rebuilds the venv.
+Ollama is installed with whatever your platform already uses, and it asks first:
+
+| | |
+|---|---|
+| Windows | `winget install Ollama.Ollama` |
+| macOS | `brew install --cask ollama-app` |
+| Linux | the official `https://ollama.com/install.sh` |
+
+If that package manager is missing, the installer says so and points you at
+[ollama.com/download](https://ollama.com/download) rather than guessing. Either
+way the install continues — Ollama is optional, and without it you get raw
+transcripts instead of cleaned-up ones.
+
+| Flag | |
+|---|---|
+| `--yes` / `-y` | don't prompt before installing Ollama |
+| `--no-ollama` | never install Ollama; skip cleanup if it's absent |
+| `--no-models` | skip the model downloads |
+| `--recreate` | rebuild `.venv` from scratch |
 
 ### macOS needs two permissions
 
