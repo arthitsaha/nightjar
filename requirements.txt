@@ -14,3 +14,7 @@ soxr
 
 keyboard; sys_platform == "win32"
 pynput; sys_platform != "win32"
+
+# The native macOS overlay. pynput already pulls pyobjc in, but naming it
+# here keeps the dependency honest rather than relying on that.
+pyobjc-framework-Cocoa; sys_platform == "darwin"

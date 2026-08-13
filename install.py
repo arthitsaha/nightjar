@@ -49,6 +49,10 @@ COMMON = [
 # `keyboard` gives the best low-level hook on Windows but needs root on Unix
 # and does not work properly on macOS; pynput covers those instead.
 PLATFORM_DEPS = ["keyboard"] if IS_WIN else ["pynput"]
+# The native AppKit overlay. pynput drags pyobjc in anyway, but the overlay
+# depends on it directly, so ask for it directly.
+if IS_MAC:
+    PLATFORM_DEPS.append("pyobjc-framework-Cocoa")
 
 OLLAMA_MODEL = "qwen2.5:3b-instruct-q4_K_M"
 STT_MODEL = "nemo-parakeet-tdt-0.6b-v2"

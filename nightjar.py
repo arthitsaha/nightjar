@@ -599,20 +599,28 @@ def _mix(a: tuple[float, float, float], b: tuple[float, float, float], t: float)
     return tuple(x + (y - x) * t for x, y in zip(a, b))
 
 
-class Overlay:
-    """
-    A floating blob that breathes while idle, swells with your voice while
-    listening, and churns while the models work.
+@dataclass
+class Frame:
+    """One painted frame, in plain numbers so any toolkit can draw it."""
 
-    Tkinter has to own the main thread and has no per-item alpha, so the depth
-    comes from stacking a filled core under two wobbling outlines rather than
-    from real transparency. Every other component talks to this through a
-    queue drained by the animation loop.
-    """
+    core: list[float]                       # flat x,y polygon
+    ring_inner: list[float]
+    ring_outer: list[float]
+    core_hex: str
+    ring_hex: str
+    gloss: tuple[float, float, float]       # cx, cy, radius
+    gloss_hex: str
+    orbit: tuple[float, float, float] | None
 
-    # colour key for the window: any pixel painted this exact shade is punched
-    # out to the desktop, which is what makes the blob look like it floats.
-    KEY = "#ff00fe"
+
+class BlobBase:
+    """
+    The blob itself: geometry, colour, and the per-frame physics.
+
+    Deliberately knows nothing about a window system. Tk draws this on
+    Windows and Linux, AppKit draws it on macOS, and both get identical
+    motion because both call the same `_advance`.
+    """
 
     # The blob carries the whole status signal now - colour for which stage,
     # size for your voice, churn rate for how hard it is working. There is no
@@ -636,10 +644,7 @@ class Overlay:
     POINTS = 60
     FRAME_MS = 20
 
-    def __init__(self, events: queue.Queue, hotkey_label: str, scale: float = 1.0):
-        import tkinter as tk
-
-        self.tk = tk
+    def _init_blob(self, events: queue.Queue, hotkey_label: str, scale: float) -> None:
         self.events = events
         self.hotkey_label = hotkey_label
         self.state = UiState()
@@ -654,6 +659,106 @@ class Overlay:
         self.radius = self.STYLE["idle"]["r"] * self.scale
         self.core_rgb = _to_rgb(self.STYLE["idle"]["core"])
         self.ring_rgb = _to_rgb(self.STYLE["idle"]["ring"])
+
+    def _drain(self) -> bool:
+        """Apply everything queued since the last frame; True means quit."""
+        try:
+            while True:
+                kind, payload = self.events.get_nowait()
+                if kind == "state":
+                    self.state.status = payload.get("status", self.state.status)
+                    self.state.detail = payload.get("detail", "")
+                elif kind == "level":
+                    self.state.level = payload
+                elif kind == "quit":
+                    return True
+        except queue.Empty:
+            pass
+        return False
+
+    def _blob(self, radius: float, wobble: float, phase: float, spin: float = 0.0):
+        pts: list[float] = []
+        for i in range(self.POINTS):
+            theta = 2 * math.pi * i / self.POINTS
+            offset = sum(
+                amp * math.sin(freq * theta + phase * rate + shift)
+                for freq, amp, rate, shift in self.HARMONICS
+            ) / self._NORM
+            r = radius * (1.0 + wobble * offset)
+            angle = theta + spin
+            pts.append(self.CX + r * math.cos(angle))
+            pts.append(self.CY + r * math.sin(angle))
+        return pts
+
+    def _advance(self) -> Frame:
+        """Step the animation one frame and describe what to paint."""
+        style = self.STYLE.get(self.state.status, self.STYLE["idle"])
+        listening = self.state.status == "recording"
+
+        # Mic level drives the size while listening. Attack fast so a syllable
+        # registers immediately, release slower so it settles instead of
+        # flickering between frames.
+        target = min(1.0, self.state.level * 5.0) if listening else 0.0
+        self.level += (target - self.level) * (0.55 if target > self.level else 0.16)
+
+        want_r = (style["r"] + (self.level * 30.0 if listening else 0.0)) * self.scale
+        self.radius += (want_r - self.radius) * 0.30
+
+        self.phase += style["spin"] * 0.06
+        self.spin += (0.055 if self.state.status == "thinking" else 0.006)
+
+        self.core_rgb = _mix(self.core_rgb, _to_rgb(style["core"]), 0.18)
+        self.ring_rgb = _mix(self.ring_rgb, _to_rgb(style["ring"]), 0.18)
+
+        wob = style["wob"] + self.level * 0.10
+        r = self.radius
+
+        # highlight, offset up-left so the core reads as a sphere
+        g = r * 0.34
+        gx, gy = self.CX - r * 0.30, self.CY - r * 0.34
+
+        orbit = None
+        if self.state.status == "thinking":
+            orbit_r = r * 2.05
+            orbit = (
+                self.CX + orbit_r * math.cos(self.spin * 2.1),
+                self.CY + orbit_r * math.sin(self.spin * 2.1),
+                max(2.0, 3.5 * self.scale),
+            )
+
+        return Frame(
+            core=self._blob(r, wob, self.phase, self.spin),
+            ring_inner=self._blob(r * 1.34, wob * 0.85, self.phase * 0.8 + 1.1,
+                                  -self.spin * 0.7),
+            ring_outer=self._blob(r * 1.72, wob * 0.7, self.phase * 0.55 + 2.4,
+                                  self.spin * 0.45),
+            core_hex=_to_hex(self.core_rgb),
+            ring_hex=_to_hex(self.ring_rgb),
+            gloss=(gx, gy, g),
+            gloss_hex=_to_hex(_mix(self.core_rgb, (255, 255, 255), 0.42)),
+            orbit=orbit,
+        )
+
+
+class Overlay(BlobBase):
+    """
+    The Tk renderer: Windows and Linux.
+
+    Tkinter has to own the main thread and has no per-item alpha, so the depth
+    comes from stacking a filled core under two wobbling outlines rather than
+    from real transparency. Every other component talks to this through a
+    queue drained by the animation loop.
+    """
+
+    # colour key for the window: any pixel painted this exact shade is punched
+    # out to the desktop, which is what makes the blob look like it floats.
+    KEY = "#ff00fe"
+
+    def __init__(self, events: queue.Queue, hotkey_label: str, scale: float = 1.0):
+        import tkinter as tk
+
+        self.tk = tk
+        self._init_blob(events, hotkey_label, scale)
 
         self.root = tk.Tk()
         self.root.overrideredirect(True)
@@ -819,98 +924,33 @@ class Overlay:
         except Exception:
             pass
 
-    # -- geometry ---------------------------------------------------------
-
-    def _blob(self, radius: float, wobble: float, phase: float, spin: float = 0.0):
-        """Closed polygon whose radius is perturbed by summed sine harmonics."""
-        pts = []
-        for i in range(self.POINTS):
-            theta = 2 * math.pi * i / self.POINTS
-            offset = sum(
-                amp * math.sin(freq * theta + phase * rate + shift)
-                for freq, amp, rate, shift in self.HARMONICS
-            ) / self._NORM
-            r = radius * (1.0 + wobble * offset)
-            angle = theta + spin
-            pts.append(self.CX + r * math.cos(angle))
-            pts.append(self.CY + r * math.sin(angle))
-        return pts
-
     # -- animation --------------------------------------------------------
 
-    def _drain(self) -> None:
-        try:
-            while True:
-                kind, payload = self.events.get_nowait()
-                if kind == "state":
-                    self.state.status = payload.get("status", self.state.status)
-                    self.state.detail = payload.get("detail", "")
-                elif kind == "level":
-                    self.state.level = payload
-                elif kind == "quit":
-                    self.root.destroy()
-                    raise SystemExit
-        except queue.Empty:
-            pass
-
     def _frame(self) -> None:
-        try:
-            self._drain()
-        except SystemExit:
+        if self._drain():
+            self.close()
             return
 
-        style = self.STYLE.get(self.state.status, self.STYLE["idle"])
-        listening = self.state.status == "recording"
+        f = self._advance()
 
-        # Mic level drives the size while listening. Attack fast so a syllable
-        # registers immediately, release slower so it settles instead of
-        # flickering between frames.
-        target = min(1.0, self.state.level * 5.0) if listening else 0.0
-        self.level += (target - self.level) * (0.55 if target > self.level else 0.16)
+        self.canvas.coords(self.core, *f.core)
+        self.canvas.itemconfig(self.core, fill=f.core_hex)
 
-        want_r = (style["r"] + (self.level * 30.0 if listening else 0.0)) * self.scale
-        self.radius += (want_r - self.radius) * 0.30
+        self.canvas.coords(self.ring_inner, *f.ring_inner)
+        self.canvas.itemconfig(self.ring_inner, outline=f.ring_hex)
 
-        self.phase += style["spin"] * 0.06
-        self.spin += (0.055 if self.state.status == "thinking" else 0.006)
+        self.canvas.coords(self.ring_outer, *f.ring_outer)
+        self.canvas.itemconfig(self.ring_outer, outline=f.ring_hex)
 
-        self.core_rgb = _mix(self.core_rgb, _to_rgb(style["core"]), 0.18)
-        self.ring_rgb = _mix(self.ring_rgb, _to_rgb(style["ring"]), 0.18)
-        core_hex = _to_hex(self.core_rgb)
-        ring_hex = _to_hex(self.ring_rgb)
-
-        wob = style["wob"] + self.level * 0.10
-        r = self.radius
-
-        self.canvas.coords(self.core, *self._blob(r, wob, self.phase, self.spin))
-        self.canvas.itemconfig(self.core, fill=core_hex)
-
-        self.canvas.coords(
-            self.ring_inner, *self._blob(r * 1.34, wob * 0.85, self.phase * 0.8 + 1.1,
-                                         -self.spin * 0.7)
-        )
-        self.canvas.itemconfig(self.ring_inner, outline=ring_hex)
-
-        self.canvas.coords(
-            self.ring_outer, *self._blob(r * 1.72, wob * 0.7, self.phase * 0.55 + 2.4,
-                                         self.spin * 0.45)
-        )
-        self.canvas.itemconfig(self.ring_outer, outline=ring_hex)
-
-        # highlight, offset up-left so the core reads as a sphere
-        g = r * 0.34
-        gx, gy = self.CX - r * 0.30, self.CY - r * 0.34
+        gx, gy, g = f.gloss
         self.canvas.coords(self.gloss, gx - g, gy - g, gx + g, gy + g)
-        self.canvas.itemconfig(self.gloss, fill=_to_hex(_mix(self.core_rgb, (255, 255, 255), 0.42)))
+        self.canvas.itemconfig(self.gloss, fill=f.gloss_hex)
 
         # a bead orbiting the blob, only while the models are working
-        if self.state.status == "thinking":
-            orbit_r = r * 2.05
-            ox = self.CX + orbit_r * math.cos(self.spin * 2.1)
-            oy = self.CY + orbit_r * math.sin(self.spin * 2.1)
-            bead = max(2.0, 3.5 * self.scale)
+        if f.orbit:
+            ox, oy, bead = f.orbit
             self.canvas.coords(self.orbit, ox - bead, oy - bead, ox + bead, oy + bead)
-            self.canvas.itemconfig(self.orbit, fill=core_hex, state="normal")
+            self.canvas.itemconfig(self.orbit, fill=f.core_hex, state="normal")
         else:
             self.canvas.itemconfig(self.orbit, state="hidden")
 
@@ -918,6 +958,225 @@ class Overlay:
 
     def run(self) -> None:
         self.root.mainloop()
+
+
+_BLOB_VIEW_CLASS = None
+
+
+def _blob_view_class():
+    """
+    Build the NSView subclass once, lazily.
+
+    Defining an Objective-C subclass registers it with the runtime, so this
+    can only happen a single time per process - and only on a machine that
+    actually has AppKit.
+    """
+    global _BLOB_VIEW_CLASS
+    if _BLOB_VIEW_CLASS is not None:
+        return _BLOB_VIEW_CLASS
+
+    import objc
+    from AppKit import NSView, NSBezierPath, NSColor
+    from Foundation import NSMakeRect, NSMakePoint
+
+    def ns_colour(hex_colour: str):
+        r, g, b = _to_rgb(hex_colour)
+        return NSColor.colorWithSRGBRed_green_blue_alpha_(r / 255, g / 255, b / 255, 1.0)
+
+    def path_from(points: list[float]):
+        path = NSBezierPath.bezierPath()
+        path.moveToPoint_(NSMakePoint(points[0], points[1]))
+        for i in range(2, len(points), 2):
+            path.lineToPoint_(NSMakePoint(points[i], points[i + 1]))
+        path.closePath()
+        return path
+
+    class NightjarBlobView(NSView):
+        def initWithOverlay_frame_(self, overlay, frame):
+            self = objc.super(NightjarBlobView, self).initWithFrame_(frame)
+            if self is None:
+                return None
+            self.overlay = overlay
+            return self
+
+        def isFlipped(self):
+            # Match Tk's y-down coordinates so one set of blob maths serves
+            # both renderers and the gloss stays on the correct side.
+            return True
+
+        def isOpaque(self):
+            return False
+
+        def tick_(self, timer):
+            overlay = self.overlay
+            if overlay._drain():
+                overlay.close()
+                return
+            overlay.frame = overlay._advance()
+            self.setNeedsDisplay_(True)
+
+        def drawRect_(self, rect):
+            frame = getattr(self.overlay, "frame", None)
+            if frame is None:
+                return
+
+            # Genuine per-pixel transparency: no colour key, no dark card.
+            NSColor.clearColor().set()
+            NSBezierPath.fillRect_(self.bounds())
+
+            ring = ns_colour(frame.ring_hex)
+            width = max(1.0, round(2 * self.overlay.scale))
+
+            outer = path_from(frame.ring_outer)
+            outer.setLineWidth_(max(1.0, width - 1))
+            ring.set()
+            outer.stroke()
+
+            inner = path_from(frame.ring_inner)
+            inner.setLineWidth_(width)
+            ring.set()
+            inner.stroke()
+
+            ns_colour(frame.core_hex).set()
+            path_from(frame.core).fill()
+
+            gx, gy, g = frame.gloss
+            ns_colour(frame.gloss_hex).set()
+            NSBezierPath.bezierPathWithOvalInRect_(
+                NSMakeRect(gx - g, gy - g, g * 2, g * 2)
+            ).fill()
+
+            if frame.orbit:
+                ox, oy, bead = frame.orbit
+                ns_colour(frame.core_hex).set()
+                NSBezierPath.bezierPathWithOvalInRect_(
+                    NSMakeRect(ox - bead, oy - bead, bead * 2, bead * 2)
+                ).fill()
+
+    _BLOB_VIEW_CLASS = NightjarBlobView
+    return _BLOB_VIEW_CLASS
+
+
+class CocoaOverlay(BlobBase):
+    """
+    The AppKit renderer: macOS only.
+
+    Tk on macOS has neither a colour key nor click-through, so the blob there
+    was a solid square that could swallow a click. A borderless NSPanel gets
+    both properties natively, which is what makes this match the Windows look
+    exactly:
+
+        setOpaque_(False) + clearColor   real transparency, like the colour key
+        setIgnoresMouseEvents_(True)     click-through, like WS_EX_TRANSPARENT
+        ActivationPolicyAccessory        never steals focus, like WS_EX_NOACTIVATE
+
+    That last one matters as much here as it does on Windows: a window that
+    takes focus moves the caret, and the paste lands in the wrong place.
+    """
+
+    def __init__(self, events: queue.Queue, hotkey_label: str, scale: float = 1.0):
+        import AppKit
+        from AppKit import NSApplication, NSPanel, NSColor, NSScreen
+        from Foundation import NSMakeRect
+
+        self._init_blob(events, hotkey_label, scale)
+        self.appkit = AppKit
+        self.frame: Frame | None = None
+
+        self.app = NSApplication.sharedApplication()
+        # Accessory: no Dock icon, no menu bar, and crucially never becomes the
+        # active application when its window is ordered in.
+        self.app.setActivationPolicy_(
+            getattr(AppKit, "NSApplicationActivationPolicyAccessory", 1)
+        )
+
+        # visibleFrame is the screen minus the Dock and menu bar - the direct
+        # equivalent of SPI_GETWORKAREA, so no guessing at a Dock height.
+        visible = NSScreen.mainScreen().visibleFrame()
+        margin = 16 * self.scale
+        x = visible.origin.x + visible.size.width - self.W - margin
+        y = visible.origin.y + margin
+        rect = NSMakeRect(x, y, self.W, self.H)
+
+        self.panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+            rect,
+            getattr(AppKit, "NSWindowStyleMaskBorderless", 0),
+            getattr(AppKit, "NSBackingStoreBuffered", 2),
+            False,
+        )
+        self.panel.setOpaque_(False)
+        self.panel.setBackgroundColor_(NSColor.clearColor())
+        self.panel.setHasShadow_(False)
+        self.panel.setLevel_(getattr(AppKit, "NSStatusWindowLevel", 25))
+        self.panel.setIgnoresMouseEvents_(True)
+        self.panel.setFloatingPanel_(True)
+        self.panel.setBecomesKeyOnlyIfNeeded_(True)
+        self.panel.setCollectionBehavior_(
+            getattr(AppKit, "NSWindowCollectionBehaviorCanJoinAllSpaces", 1 << 0)
+            | getattr(AppKit, "NSWindowCollectionBehaviorStationary", 1 << 4)
+            | getattr(AppKit, "NSWindowCollectionBehaviorFullScreenAuxiliary", 1 << 8)
+        )
+
+        view_class = _blob_view_class()
+        self.view = view_class.alloc().initWithOverlay_frame_(
+            self, NSMakeRect(0, 0, self.W, self.H)
+        )
+        self.panel.setContentView_(self.view)
+        # orderFront, not makeKeyAndOrderFront - taking key would move the caret.
+        self.panel.orderFrontRegardless()
+        Log.dim("  ui   native AppKit overlay")
+
+    def run(self) -> None:
+        import Foundation
+        from Foundation import NSTimer, NSRunLoop
+
+        timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            self.FRAME_MS / 1000.0, self.view, "tick:", None, True
+        )
+        # Also run while a menu or resize loop is tracking, so the blob does
+        # not freeze mid-dictation the way a default-mode timer would.
+        NSRunLoop.currentRunLoop().addTimer_forMode_(
+            timer, getattr(Foundation, "NSRunLoopCommonModes", "kCFRunLoopCommonModes")
+        )
+        self.timer = timer
+        self.app.run()
+
+    def close(self) -> None:
+        try:
+            if getattr(self, "timer", None):
+                self.timer.invalidate()
+            self.panel.orderOut_(None)
+        except Exception:
+            pass
+        try:
+            from AppKit import NSApp, NSEvent
+            from Foundation import NSMakePoint
+
+            self.app.stop_(None)
+            # stop_ only takes effect once the loop next processes an event,
+            # and timers alone will not wake it, so hand it one.
+            event = NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
+                getattr(self.appkit, "NSEventTypeApplicationDefined", 15),
+                NSMakePoint(0, 0), 0, 0, 0, None, 0, 0, 0,
+            )
+            NSApp().postEvent_atStart_(event, True)
+        except Exception:
+            pass
+
+
+def make_overlay(events: queue.Queue, hotkey_label: str, scale: float):
+    """
+    Native AppKit on macOS, Tk everywhere else.
+
+    Falls back to Tk if AppKit is unavailable or the panel will not build, so
+    a broken pyobjc costs you the nicer overlay rather than the whole app.
+    """
+    if IS_MAC:
+        try:
+            return CocoaOverlay(events, hotkey_label, scale)
+        except Exception as exc:
+            Log.warn(f"native overlay unavailable ({exc}) - falling back to Tk")
+    return Overlay(events, hotkey_label, scale)
 
 
 # --------------------------------------------------------------------------
@@ -1258,8 +1517,8 @@ class Nightjar:
 
         self.overlay = None
         if cfg["ui"].get("overlay", True):
-            self.overlay = Overlay(
-                self.events, self.spec.label, scale=cfg["ui"].get("scale", 0.62)
+            self.overlay = make_overlay(
+                self.events, self.spec.label, cfg["ui"].get("scale", 0.62)
             )
 
         self._meter_stop = threading.Event()

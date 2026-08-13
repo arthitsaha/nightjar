@@ -77,12 +77,6 @@ failing; startup continues normally underneath it.
 
 ### Known macOS issues
 
-**The blob may draw as a plain square.** Tk on macOS has no colour-key
-transparency, and where the transparent-window attribute doesn't take effect the
-overlay falls back to a small dark card. Startup logs which path it took
-(`ui   macOS transparent window`, or a line explaining why not). Set
-`"overlay": false` in `config.json` to turn it off entirely.
-
 **`KeyError: 'AXIsProcessTrusted'` on the listener thread.** pynput asks macOS
 whether it is a trusted accessibility client, and on newer pyobjc builds that
 lookup fails through the lazy loader — killing the hotkey while the app looks
@@ -272,9 +266,18 @@ the status: dim grey idle, pink swelling with your voice, blue churning with an
 orbiting bead while processing, green flash when pasted. `ui.scale` resizes the
 whole thing from one number.
 
-On Windows it's click-through and never takes focus. On macOS Tk offers no
-click-through, so the blob can catch a click if you aim at it — it stays in the
-corner to make that unlikely.
+It's click-through and never takes focus on both platforms, which matters more
+than it sounds: a window that takes focus moves the text caret, and the paste
+lands somewhere you didn't mean.
+
+Getting there takes a different toolkit on each OS. Windows uses Tk with a
+colour-key transparent window plus `WS_EX_TRANSPARENT | WS_EX_NOACTIVATE`. Tk on
+macOS can do neither — hence the solid square earlier builds drew there — so
+macOS uses a borderless `NSPanel` through pyobjc instead, with
+`setIgnoresMouseEvents_` for click-through and an accessory activation policy so
+it never becomes the active app. Both renderers share the same blob maths, so
+the motion is identical; only the painting differs. If AppKit is unavailable,
+it falls back to Tk and says so.
 
 ## If you tune the cleanup prompt
 
