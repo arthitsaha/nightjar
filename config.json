@@ -2,11 +2,10 @@
   "hotkey": {
     "mode": "hold",
     "key": "right ctrl",
-    "key_mac": "right option",
+    "key_mac": "right command",
     "scan_code": null,
-    "_comment": "mode: 'hold' (push-to-talk) or 'toggle'. 'key' is used on Windows/Linux, 'key_mac' on macOS (most Mac keyboards have no Right Ctrl). scan_code is Windows-only: if probe_fn.py shows your Fn key emitting a code, put it here and set key to null."
+    "_comment": "Dictation key. 'key' is Windows/Linux (Right Ctrl), 'key_mac' is macOS (Right Command). scan_code is a Windows-only exact override: run `run.bat probe`, press your key, and put the code it prints here with 'key' set to null."
   },
-
   "stt": {
     "model": "nemo-parakeet-tdt-0.6b-v2",
     "quantization": "int8",
@@ -15,7 +14,6 @@
     "resample": "auto",
     "min_duration_sec": 0.35
   },
-
   "llm": {
     "enabled": true,
     "host": "http://127.0.0.1:11434",
@@ -26,13 +24,70 @@
     "max_tokens": 512,
     "fallback_to_raw": true
   },
-
+  "hotkey_ask": {
+    "enabled": true,
+    "mode": "hold",
+    "key": null,
+    "key_mac": "right option",
+    "scan_code": 54,
+    "modifier": null,
+    "modifier_mac": null,
+    "_comment": "Hold this key and speak to ask instead of dictating; the answer is printed, shown, and spoken, never pasted. With memory on, every question searches your connected sources first and falls back to the plain assistant when nothing matches; say the trigger phrase to ask memory only. Standalone key: 'right alt' on Windows/Linux, 'right option' on macOS (dictation is Right Command there, so Right Option is free). scan_code is a Windows-only exact override, same as the dictation block - use `run.bat probe` if Right Alt does not fire. Alternatively leave 'key' null and set 'modifier' to chord onto the dictation key."
+  },
+  "tts": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1.0,
+    "_comment": "Reads answers aloud. Needs `install.py --tts` once: it adds kokoro-onnx and downloads the 82M model. Engine is 'kokoro' for now."
+  },
+  "memory": {
+    "enabled": true,
+    "db_path": "memory.db",
+    "trigger": "hey jar",
+    "embed_model": "nomic-embed-text",
+    "rerank_model": "ms-marco-MiniLM-L-6-v2",
+    "extract_model": "qwen3:30b-a3b",
+    "top_k_retrieve": 30,
+    "top_k_rerank": 8,
+    "rerank_pool": 24,
+    "open_ui": true,
+    "_comment2": "rerank_model names a folder under models/. ms-marco-MiniLM-L-6-v2 (23M) scores ~35 ms per candidate on the reference CPU; bge-reranker-v2-m3 (568M, multilingual) is ~500 ms and made a lookup take 12 s, so it is opt-in. rerank_pool is how many fused candidates the cross-encoder scores - the single biggest cost in a request.",
+    "_comment": "The local context engine. Needs `install.py --memory` once. Say 'hey jar, ...' mid-dictation to compose an answer from your connected sources at the cursor; the ask key searches those sources on every question and speaks the answer, no trigger needed. The trigger is matched ignoring spaces, so 'heyjar' works too. open_ui brings up the connector window with the keyboard; `run.bat --no-ui` skips it for one run."
+  },
+  "compose": {
+    "enabled": true,
+    "tier": "auto",
+    "model": null,
+    "hosted_fallback": {
+      "enabled": true,
+      "mode": "always",
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "max_tokens": 2000,
+      "reasoning_effort": "low",
+      "timeout_sec": 30,
+      "_comment": "Compose and ask only - never dictation cleanup, never fact extraction. Put OPENAI_API_KEY in .env (see .env.example). mode 'always' sends every lookup; 'fallback' keeps the local 3B in front and only pays the network when it comes back empty. Any OpenAI-shaped endpoint works via base_url. max_tokens must also cover reasoning tokens, which are billed and counted but never shown - too low and the reply comes back empty. Measured on the real mailbox: hosted 9/9 correct with 0 hallucinations vs local 8/9 with 1, and 3.7s vs 12s. Run `python -m memory.answer_eval [--local]` to re-measure after any change."
+    },
+    "timeout_sec": 90,
+    "max_tokens": 200,
+    "context_chunks": 5,
+    "_comment": "The paste-at-cursor half of memory. tier 'auto' picks by hardware; model overrides it explicitly (null reuses the warm cleanup model - correct on 4 GB GPUs). hosted_fallback applies to compose only, never extraction, and stays off unless you turn it on. timeout_sec covers the whole retrieved-context call: eight mail chunks is a ~3000-token prefill, which at 30s was timing out under memory pressure and being reported as 'nothing found'.",
+    "relay": {
+      "enabled": false,
+      "url": "",
+      "key_env": "NIGHTJAR_LICENCE_KEY",
+      "timeout_sec": 60,
+      "_comment": "Where the shaping happens. Off means this machine composes its own answers. On means retrieval stays here - the index never moves - and the retrieved passages are posted to a relay that owns the prompts, the model choice and the provider credentials. See ARCHITECTURE.md, Distribution."
+    }
+  },
   "output": {
     "method": "paste",
     "restore_clipboard": true,
     "trailing_space": true
   },
-
   "ui": {
     "overlay": true,
     "scale": 0.62,

@@ -364,6 +364,161 @@ def fetch_stt(skip: bool) -> None:
     ok("speech model cached and warmed")
 
 
+KOKORO_FILES = {
+    "kokoro-v1.0.onnx":
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+        "model-files-v1.0/kokoro-v1.0.onnx",
+    "voices-v1.0.bin":
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+        "model-files-v1.0/voices-v1.0.bin",
+}
+
+
+def setup_tts() -> None:
+    """
+    Optional speech output: the kokoro-onnx package plus its model files.
+
+    Kept behind a flag because it is only useful with the ask hotkey, and the
+    model is another ~330 MB nobody should download by accident.
+    """
+    step("Setting up speech output (Kokoro)")
+    py = str(venv_python())
+
+    proc = run([py, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
+    if proc.returncode != 0:
+        warn("kokoro-onnx install failed - answers will stay text only")
+        print(proc.stderr[-1500:])
+        return
+    ok("kokoro-onnx installed")
+
+    models = ROOT / "models"
+    models.mkdir(exist_ok=True)
+    for name, url in KOKORO_FILES.items():
+        target = models / name
+        if target.exists() and target.stat().st_size > 0:
+            ok(f"{name} already present")
+            continue
+        dim(f"downloading {name}")
+        # Straight to a temp name so an interrupted download cannot leave a
+        # truncated file that looks complete on the next run.
+        partial = target.with_suffix(target.suffix + ".part")
+        try:
+            urllib.request.urlretrieve(url, partial)
+            partial.replace(target)
+            ok(f"{name} ({target.stat().st_size / 1e6:.0f} MB)")
+        except Exception as exc:
+            partial.unlink(missing_ok=True)
+            warn(f"could not download {name} ({exc})")
+            return
+
+    dim('set "enabled": true in the "tts" block of config.json to switch it on')
+
+
+# `uv` is here for its `uvx` runner: the Gmail preset spawns workspace-mcp in
+# an isolated environment because that package pins mcp<2 while Nightjar's
+# client needs mcp>=2 - installing it here would downgrade the SDK under us.
+MEMORY_PACKAGES = ["sqlite-vec", "mcp", "fastapi", "uvicorn",
+                   "tokenizers", "huggingface_hub", "pywebview", "uv"]
+EMBED_MODEL = "nomic-embed-text"
+RERANKER_DIR_NAME = "ms-marco-MiniLM-L-6-v2"
+# The reranker needs an ONNX export; BAAI publishes only PyTorch weights, so
+# try known community exports and degrade to passthrough reranking otherwise.
+# A 23M cross-encoder, not the 568M one the architecture doc assumed. Measured
+# on the reference CPU against a real mailbox: 35 ms per candidate versus
+# 513 ms for bge-reranker-v2-m3-int8, for equal or better recall on the same
+# pools. Zen 2 has no VNNI, so quantising the big model does not rescue it -
+# only a smaller model does. bge-reranker-v2-m3 remains installable by hand
+# for multilingual corpora; set memory.rerank_model to its folder name.
+RERANKER_SOURCES = [
+    ("Xenova/ms-marco-MiniLM-L-6-v2", "onnx/model.onnx"),
+    ("cross-encoder/ms-marco-MiniLM-L-6-v2", "onnx/model.onnx"),
+]
+RERANKER_TOKENIZER_REPO = "Xenova/ms-marco-MiniLM-L-6-v2"
+
+
+def setup_memory() -> None:
+    """
+    Optional context engine: pip packages, the embedding model, the reranker.
+
+    Everything stays pip + Ollama - no Docker, no services. A failed reranker
+    download is not fatal: retrieval runs without it, just less accurately.
+    """
+    step("Setting up memory (context engine)")
+    py = str(venv_python())
+
+    proc = run([py, "-m", "pip", "install", "--quiet", *MEMORY_PACKAGES])
+    if proc.returncode != 0:
+        warn("memory packages failed to install - memory stays off")
+        print(proc.stderr[-1500:])
+        return
+    ok("memory packages installed (sqlite-vec, mcp, fastapi, uvicorn, tokenizers)")
+
+    exe = find_ollama()
+    if exe and server_up():
+        listing = run([exe, "list"])
+        if EMBED_MODEL in listing.stdout:
+            ok(f"{EMBED_MODEL} already present")
+        else:
+            dim(f"pulling {EMBED_MODEL} (~274 MB, one time)")
+            if subprocess.run([exe, "pull", EMBED_MODEL]).returncode != 0:
+                warn(f"could not pull {EMBED_MODEL} - retrieval needs it")
+    else:
+        warn(f"Ollama not running - pull the embedding model later: ollama pull {EMBED_MODEL}")
+
+    target = ROOT / "models" / RERANKER_DIR_NAME
+    target.mkdir(parents=True, exist_ok=True)
+    model_file = target / "model.onnx"
+    tok_file = target / "tokenizer.json"
+
+    fetch = (
+        "from huggingface_hub import hf_hub_download\n"
+        "import shutil, sys\n"
+        f"shutil.copy(hf_hub_download({RERANKER_TOKENIZER_REPO!r}, 'tokenizer.json'), {str(tok_file)!r})\n"
+    )
+    if run([py, "-c", fetch]).returncode == 0:
+        ok("reranker tokenizer downloaded")
+    else:
+        warn("could not fetch the reranker tokenizer - reranking disabled")
+
+    if model_file.exists() and model_file.stat().st_size > 0:
+        ok("reranker model already present")
+    else:
+        got = False
+        for repo, filename in RERANKER_SOURCES:
+            dim(f"trying reranker ONNX from {repo}")
+            # These exports keep their weights in a companion `.onnx.data`
+            # file - the graph alone is ~100 KB and loads to an error about
+            # missing external data. It must land beside the graph under the
+            # exact name the graph references, so both are fetched together
+            # and straight into the target directory: the HF cache would
+            # otherwise hold a second 1.1 GB copy on whichever drive it lives
+            # on, which is how this silently failed on a full system disk.
+            fetch = (
+                "from huggingface_hub import hf_hub_download, list_repo_files\n"
+                "import shutil\n"
+                f"files = list_repo_files({repo!r})\n"
+                f"target = {str(target)!r}\n"
+                f"shutil.copy(hf_hub_download({repo!r}, {filename!r}, "
+                f"local_dir=target), {str(model_file)!r})\n"
+                f"data = {filename!r} + '.data'\n"
+                "if data in files:\n"
+                f"    hf_hub_download({repo!r}, data, local_dir=target)\n"
+            )
+            if run([py, "-c", fetch]).returncode == 0:
+                ok(f"reranker model downloaded ({repo})")
+                got = True
+                break
+        if not got:
+            warn("no reranker ONNX export reachable - retrieval runs without reranking")
+            dim("export one yourself (needs torch, one time, any machine):")
+            dim("  pip install optimum[exporters] && optimum-cli export onnx "
+                f"-m {RERANKER_TOKENIZER_REPO} --task text-classification models/{RERANKER_DIR_NAME}")
+
+    dim('set "enabled": true in the "memory" and "compose" blocks of config.json,')
+    dim("then connect sources:  run.bat connectors")
+    dim("to check the whole setup at any point:  run.bat doctor")
+
+
 def verify() -> None:
     step("Verifying the install")
     mods = ["onnx_asr", "sounddevice", "numpy", "pyperclip", "requests", "soundfile", "soxr"]
@@ -422,6 +577,11 @@ def main() -> None:
                     help="never install Ollama; run without cleanup if it is missing")
     ap.add_argument("--yes", "-y", action="store_true",
                     help="answer yes to the Ollama install prompt")
+    ap.add_argument("--tts", action="store_true",
+                    help="also set up spoken answers (kokoro-onnx, ~330 MB)")
+    ap.add_argument("--memory", action="store_true",
+                    help="also set up the context engine (MCP connectors, "
+                         "local retrieval)")
     args = ap.parse_args()
 
     system = "macOS" if IS_MAC else ("Windows" if IS_WIN else "Linux")
@@ -435,6 +595,10 @@ def main() -> None:
     pip_install()
     llm_ready = setup_ollama(args.no_models, args.yes, args.no_ollama)
     fetch_stt(args.no_models)
+    if args.tts:
+        setup_tts()
+    if args.memory:
+        setup_memory()
     verify()
     finish(llm_ready)
 

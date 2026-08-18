@@ -1,31 +1,36 @@
 """
-Fn-key probe.
+Key probe (Windows).
 
-On most laptops the Fn key is handled entirely by the keyboard's embedded
-controller: it changes what *other* keys report and never emits a scancode of
-its own. When that is the case, no program can bind it. A minority of machines
-do send a real code. This prints every raw key event so we can tell which.
+Prints the raw name and scan code of every key you press, then tells you
+exactly what to put in config.json to bind it. Use it whenever a key does
+not trigger Nightjar - the name or scan code the driver actually emits is
+often not the one you would guess (Right Alt is a classic example, and Fn
+on most laptops emits nothing at all).
 
-Run it, press the keys it asks for, then press ESC three times.
+Run it, press the key you care about a few times, then press ESC three times.
 """
 
 import keyboard
 
 seen: dict[tuple[str, int], int] = {}
+order: list[tuple[str, int]] = []
 esc_presses = 0
 finished = False
 
+# Keys that are only ever pressed *with* something else - never worth
+# suggesting as a standalone hotkey, and they crowd the summary.
+IGNORE = {"esc"}
+
 print("=" * 64)
-print("  Fn PROBE")
+print("  KEY PROBE")
 print("=" * 64)
 print()
-print("  Press these one at a time, a couple of times each:")
-print("    1. Fn            <- the key we actually care about")
-print("    2. Right Ctrl    <- the fallback binding")
-print("    3. Fn + F1       <- does the combo emit anything?")
+print("  Press the key you want to use, a few times, on its own.")
+print("  For the ask hotkey on Windows that is usually Right Alt;")
+print("  press Right Ctrl too so we can compare against dictation.")
 print()
-print("  If pressing Fn on its own prints no line at all, the")
-print("  hardware hides it from Windows and it cannot be bound.")
+print("  Each press prints its name and scan code. If a key prints")
+print("  nothing at all, the hardware hides it and no app can bind it.")
 print()
 print("  Press ESC three times when you're done.")
 print("-" * 64)
@@ -33,7 +38,6 @@ print("-" * 64)
 
 def on_event(event):
     global esc_presses, finished
-
     if finished:
         return
 
@@ -48,7 +52,10 @@ def on_event(event):
 
     identity = (str(event.name), event.scan_code)
     is_new = identity not in seen
-    seen[identity] = seen.get(identity, 0) + 1
+    if is_new:
+        seen[identity] = 0
+        order.append(identity)
+    seen[identity] += 1
 
     marker = "   <-- NEW" if is_new else ""
     print(f"  {event.event_type:<4}  name={str(event.name):<16} "
@@ -58,22 +65,28 @@ def on_event(event):
 def report():
     print()
     print("-" * 64)
-    print("  EVERY DISTINCT KEY SEEN")
+    print("  EVERY DISTINCT KEY SEEN (most pressed first)")
     print("-" * 64)
-    for (name, code), count in sorted(seen.items(), key=lambda kv: -kv[1]):
+    ranked = sorted(seen.items(), key=lambda kv: -kv[1])
+    for (name, code), count in ranked:
         print(f"    name={name!r:<18} scan_code={code:<8} seen {count}x")
 
-    fn_hits = [(n, c) for (n, c) in seen if "fn" in n.lower()]
+    # The key you pressed most, ignoring Esc, is almost certainly the one
+    # you want to bind. Suggest a ready-to-paste config for it.
+    candidates = [(n, c) for (n, c), _ in ranked if n.lower() not in IGNORE]
     print("-" * 64)
-    if fn_hits:
-        name, code = fn_hits[0]
-        print(f"  Fn IS visible to Windows. In config.json set:")
+    if candidates:
+        name, code = candidates[0]
+        print(f"  To bind the key you pressed most ({name!r}), set this in the")
+        print(f"  relevant block of config.json (hotkey, or hotkey_ask):")
+        print()
         print(f'      "key": null,')
         print(f'      "scan_code": {code}')
+        print()
+        print(f"  A scan code is exact - it binds this physical key no matter")
+        print(f"  what name the driver reports.")
     else:
-        print("  No Fn event was ever captured.")
-        print("  Your Fn key is firmware-only and cannot be bound by any app.")
-        print("  Keep Right Ctrl, or choose another key in config.json.")
+        print("  No bindable key was captured.")
     print("-" * 64)
     keyboard.unhook_all()
 

@@ -1,0 +1,33 @@
+{
+  "_readme": [
+    "Copy this file to oauth_client.json and fill in the ids you created.",
+    "It lets one person do the developer-console setup once and everyone else",
+    "just press Connect and sign in as themselves. Put it either here or in",
+    "the OS config folder (%APPDATA%/nightjar on Windows, ~/.config/nightjar",
+    "elsewhere); the config folder wins if both exist.",
+    "",
+    "This file holds a credential and is gitignored. Never commit it.",
+    "",
+    "Gmail: create the client in Google Cloud Console, add the redirect URI",
+    "http://localhost:8766/callback, and add each person's Google address",
+    "under Audience -> Test users. Up to 100 people.",
+    "",
+    "Note: while the app stays in Testing, Google expires each sign-in after",
+    "7 days, so everyone re-signs in about weekly - one click on the card.",
+    "Publishing removes that, but Gmail read access is a restricted scope and",
+    "cannot be published without a paid annual security assessment.",
+    "",
+    "Slack: create an app at api.slack.com/apps, add the same redirect URL,",
+    "then copy the id and secret from Basic Information."
+  ],
+
+  "gmail": {
+    "client_id": "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+    "client_secret": "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+
+  "slack": {
+    "client_id": "0000000000000.0000000000000",
+    "client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }
+}

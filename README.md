@@ -5,6 +5,15 @@ speak, release — cleaned-up text appears at your cursor in whatever app you're
 
 No account, no cloud, no audio ever leaves the computer.
 
+With the optional **memory** engine switched on, that promise is stated
+precisely: transcription, the index, embeddings, reranking and the language
+models all run on this machine. Connecting a source (Gmail, Slack, a database)
+obviously talks to that service — but what it returns is indexed **locally**,
+and your data is never sent to a third-party model. Hosted compose is off by
+default; if you ever turn it on, only the handful of retrieved snippets for one
+query leaves the machine, never your corpus — and never anything the background
+indexer reads.
+
 ## Install
 
 Get the code, then run the installer for your OS from inside that folder:
@@ -50,6 +59,8 @@ transcripts instead of cleaned-up ones.
 | `--no-ollama` | never install Ollama; skip cleanup if it's absent |
 | `--no-models` | skip the model downloads |
 | `--recreate` | rebuild `.venv` from scratch |
+| `--tts` | also set up spoken answers (kokoro-onnx, ~330 MB) |
+| `--memory` | also set up the context engine (MCP connectors, local retrieval) |
 
 ### Updating
 
@@ -118,6 +129,140 @@ inference:
 | Start | `run.bat` | `./run.sh` |
 | Dictate | hold **Right Ctrl** | hold **Right Option** |
 | Quit | `Ctrl+C`, or `Ctrl+Alt+Q` | `Ctrl+C`, or `Cmd+Alt+Q` |
+
+## Memory — "hey jar, ..."
+
+Optional, off by default. Keep dictating, and mid-sentence — without letting
+go of the key — say **"hey jar, what was the Ramp invoice amount"**. What you
+said before the trigger is typed as usual; the answer is retrieved from your
+connected sources and lands at the cursor as a sentence fragment, `$4,820`,
+not a paragraph. The same trigger on the ask key speaks the answer instead of
+pasting it: the key chooses the destination, the trigger word chooses whether
+memory is consulted. Spaces are ignored when matching, so "heyjar" works too,
+and `memory.trigger` in `config.json` changes the phrase.
+
+```bash
+python install.py --memory          # packages + embedding model + reranker
+run.bat                             # keyboard + connector window (./run.sh)
+```
+
+The connector window opens with the keyboard and closes with it. It is a
+native window (pywebview drives the OS webview — WebView2 on
+Windows, WKWebView on macOS; no Electron, no Node). It has two views: the
+**connector grid** for adding and syncing sources, and the **memory graph** —
+a force-directed map of every entity and fact the engine has extracted, where
+clicking a node shows its facts with the exact source snippet each one came
+from, superseded facts included. It also shows the log, so a connector that
+will not connect says why on the same page as the button. `run.bat --no-ui`
+starts the keyboard without the window.
+
+### Connecting a source
+
+Sources are the vendors' own **hosted MCP servers**, so there is nothing to
+install — no Node, no `npx`, just an HTTPS URL and a browser sign-in. How much
+setup that takes depends on one thing: whether the vendor lets an app register
+itself (OAuth *dynamic client registration*). Verified against each server:
+
+| Source | Setup | Why |
+|---|---|---|
+| **Supabase** | Click Connect, approve in the browser | Registration endpoint present — Nightjar registers itself |
+| **Slack** | Create a Slack app once, paste id + secret, then sign in | Slack advertises no registration endpoint |
+| **Gmail** | Create a Google OAuth client once, paste id + secret, then sign in | Google advertises no registration endpoint |
+
+For the two that need a client, the card shows the exact steps with links to
+each page, and the redirect URI to paste in. That part is once, ever; every
+sign-in afterwards is a single browser round trip. The client id is stored with
+the connection, the secret and the tokens go to your OS config folder — never
+into this repo.
+
+Products that make Gmail feel like one click do it by owning the OAuth client
+and putting their servers in the middle of your mail. A local app has no middle
+party, which is the whole point here and also the reason for the extra step.
+
+### Setting it up for other people
+
+You can do the console work **once** and let everyone else just sign in. Create
+the OAuth client, add each person's Google address under **Audience → Test
+users** (up to 100) — **including your own**, because the account that owns the
+project is not a test user automatically, and Google will refuse it with
+*"can only be accessed by developer-approved testers"* until you add it. Then
+copy `oauth_client.example.json` to
+`oauth_client.json`, fill in the id and secret, and put that file on each
+machine — either beside `nightjar.py` or in the OS config folder. Their Gmail
+card then shows a single **Sign in with Google** button and nothing to
+configure. Each person still signs in as themselves and Nightjar only ever
+reads their own mail.
+
+`oauth_client.json` is a credential and is gitignored. Never commit it.
+
+**The catch, and it is Google's rule, not ours:** while the app stays in
+*Testing*, every sign-in expires after **7 days**. So people re-authorise about
+weekly. Nightjar recognises an expired token, clears it, and the card asks for
+one click rather than reporting an OAuth error. Publishing the app removes the
+7-day limit, but Gmail read access is a *restricted* scope and cannot be
+published without a paid annual security assessment — so for a household,
+weekly re-sign-in is the cheaper trade. (A Google Workspace domain makes the
+app "Internal", which is exempt from both, if you ever have one.)
+
+Then set `"enabled": true` in the `"memory"` and `"compose"` blocks of
+`config.json`. Sources connect over **MCP** — Gmail, Slack, Supabase and
+GitNexus ship as presets, and any other MCP server works via a stdio command
+or an HTTP URL. Corpus sources (mail, chat) are synced and indexed into a
+local SQLite graph; live sources (databases) are queried at request time and
+cached with a timestamp, so offline you get the last known value *labelled
+with its age*, never a stale number presented as current.
+
+If memory is unavailable or nothing matches, **the lookup is never pasted** —
+"hey jar, what was..." is not dropped into your document. What you dictated
+before the trigger still lands, because those are words you actually said.
+
+### Remembering something
+
+Memory reads from your sources, and it also takes dictation — but only when you
+ask. Say **"hey jar, remember that the offsite moved to September 25"** and that
+one sentence is stored and extracted into the graph; ask for it later and it
+comes back. `remember`, `note that`, `make a note`, `store that` and `save that`
+all work. Nothing else you dictate is ever kept: memory that fills itself is
+memory nobody can predict.
+
+`python -m memory.eval --seed` writes a small test corpus and question set;
+`python -m memory.eval` prints recall@k so retrieval changes are measured,
+not vibes.
+
+### Using a hosted model instead (optional, off)
+
+Everything above runs on a local 3B. On a 4 GB GPU that answers a factual
+lookup in about a second, but a long open-ended answer generates at roughly
+10 tokens a second, so it can take ten. If that trade is wrong for you, compose
+and ask can go to a hosted model instead — **compose and ask only**. Dictation
+cleanup and background fact extraction always stay local, and cannot be
+configured otherwise: cleanup runs on everything you type, and extraction reads
+your entire mailbox.
+
+Put the key in `.env` beside `nightjar.py` (copy `.env.example`; it is
+gitignored, and never goes in `config.json`), then switch it on:
+
+```jsonc
+"compose": {
+  "hosted_fallback": {
+    "enabled": true,
+    "mode": "always",        // or "fallback": local first, hosted only if it comes back empty
+    "model": "gpt-5-nano",
+    "base_url": "https://api.openai.com/v1"
+  }
+}
+```
+
+`run.bat doctor` then reports where the key was found — never the key itself —
+and every answer that left the machine is marked `cloud ·` on the overlay and
+in the console. That marker is the condition for the feature existing at all.
+
+Any OpenAI-shaped `/chat/completions` endpoint works, so a local vLLM or a
+proxy is just a different `base_url`. An eight-chunk lookup is about 4,000
+input tokens, which on `gpt-5-nano` is roughly **$0.00025 a request** — about
+20,000 lookups for $5. Prompt caching does not apply: the stable prefix is 531
+tokens, under the 1,024-token minimum, and the retrieved chunks differ every
+time.
 
 ## What's under the hood
 
@@ -250,13 +395,25 @@ Then adjust `config.json`:
 
 ## Other commands
 
+Everything runs through the one launcher — `run.bat` on Windows, `./run.sh`
+elsewhere — so there is a single script to remember.
+
 | Command | What it does |
 |---|---|
-| `bench.bat` | Records 6 s and times each stage |
+| `run.bat` | The voice keyboard and the connector window |
+| `run.bat --no-ui` | The keyboard on its own |
+| `run.bat doctor` | Checks every moving part and names the broken one |
+| `run.bat logs -f` | Follows the log while you test |
+| `run.bat probe` | Shows whether a key reaches the OS (Windows) |
+| `run.bat --debug` | The keyboard, with the log mirrored to the console |
+| `run.bat --bench` | Records 6 s and times each stage |
+| `run.bat --devices` | Lists microphones |
+| `run.bat --no-llm` | Raw transcripts, skips cleanup |
 | `diagnose.py` | Compares model/resampling variants on one recording |
-| `probe.bat` | Shows whether your Fn key reaches the OS (Windows) |
-| `nightjar.py --devices` | Lists microphones |
-| `nightjar.py --no-llm` | Raw transcripts, skips cleanup |
+
+Everything is logged to `logs/nightjar.log`, and each MCP server's own output
+to `logs/mcp-<name>.log` — which is where a connector that refuses to start
+explains itself.
 
 ## Configuration
 
@@ -265,7 +422,7 @@ Then adjust `config.json`:
   "mode": "hold",              // "hold" = push-to-talk, "toggle" = press on/off
   "key": "right ctrl",         // Windows / Linux
   "key_mac": "right option",   // macOS (most Mac keyboards have no Right Ctrl)
-  "scan_code": null            // Windows-only escape hatch, see probe.bat
+  "scan_code": null            // Windows-only escape hatch, see run.bat probe
 },
 "stt": {
   "quantization": "int8",      // null = fp32: more accurate, slower
@@ -339,6 +496,8 @@ Every fix cost word fidelity, so it was left alone deliberately.
 | `nightjar.py` | The whole app — capture, STT, cleanup, injection, overlay, hotkeys |
 | `config.json` | Everything tunable |
 | `install.py` | Venv, dependencies, model downloads (`install.bat` / `install.sh` wrap it) |
+| `memory/` | The context engine — SQLite graph, MCP connectors, retrieval, connector UI |
+| `ARCHITECTURE.md` | The full memory/compose design and its reasoning |
 | `update.py` | Pulls the latest, with or without git (`update.bat` / `update.sh` wrap it) |
 | `diagnose.py` | One recording through four pipelines, for quality problems |
 | `selftest.py` | Model load and inference speed on this machine |

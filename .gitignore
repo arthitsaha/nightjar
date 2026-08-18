@@ -21,3 +21,46 @@ wifi-monitor-logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# downloaded TTS model files
+models/
+
+# logs - they quote your transcripts and your connectors' output
+logs/
+
+# the shared OAuth client - a credential, and this repo is public
+oauth_client.json
+
+# API keys for the optional hosted compose model. This repo is public and a
+# leaked key is someone else's bill, so the file is ignored before it exists.
+.env
+.env.*
+!.env.example
+
+# the productionized rewrite (Go client + Python server). Its own git repo,
+# deliberately nested here so it can read this one as the reference
+# implementation. Never a submodule, never tracked by this repo.
+/nightjar/
+
+# the context engine. Its own private git repo, deliberately nested here so it
+# can import logsetup and paths from this one. Never a submodule, never tracked
+# by this repo - this repository is public and the engine is not.
+#
+# It was untracked rather than ignored until now, which is not the same thing:
+# untracked means one `git add -A` publishes it, and the difference between
+# those two states is the whole of the retrieval pipeline under an MIT licence.
+/memory/
+
+# the memory graph and connector registry - personal data, never committed
+memory.db
+memory.db-wal
+memory.db-shm
+connections.json
+eval/
+
+# published builds and their signatures. Artifacts, not source - and the
+# directory a running engine serves to its clients, so a stray file here is
+# something someone's machine may download. The signing key is not here at all:
+# it lives in ~/.nightjar by default, deliberately outside any repo.
+releases/
+*.pem
