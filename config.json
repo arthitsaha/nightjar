@@ -74,14 +74,7 @@
     "timeout_sec": 90,
     "max_tokens": 200,
     "context_chunks": 5,
-    "_comment": "The paste-at-cursor half of memory. tier 'auto' picks by hardware; model overrides it explicitly (null reuses the warm cleanup model - correct on 4 GB GPUs). hosted_fallback applies to compose only, never extraction, and stays off unless you turn it on. timeout_sec covers the whole retrieved-context call: eight mail chunks is a ~3000-token prefill, which at 30s was timing out under memory pressure and being reported as 'nothing found'.",
-    "relay": {
-      "enabled": false,
-      "url": "",
-      "key_env": "NIGHTJAR_LICENCE_KEY",
-      "timeout_sec": 60,
-      "_comment": "Where the shaping happens. Off means this machine composes its own answers. On means retrieval stays here - the index never moves - and the retrieved passages are posted to a relay that owns the prompts, the model choice and the provider credentials. See ARCHITECTURE.md, Distribution."
-    }
+    "_comment": "The paste-at-cursor half of memory. tier 'auto' picks by hardware; model overrides it explicitly (null reuses the warm cleanup model - correct on 4 GB GPUs). hosted_fallback applies to compose only, never extraction, and stays off unless you turn it on. timeout_sec covers the whole retrieved-context call: eight mail chunks is a ~3000-token prefill, which at 30s was timing out under memory pressure and being reported as 'nothing found'."
   },
   "output": {
     "method": "paste",

@@ -521,15 +521,8 @@ class Assistant:
         return response.json()["message"]["content"].strip()
 
 
-# The composition layer lives in the context engine, not here.
-#
-# It was 660 lines of prompts, few-shots and grounding rules in a file that is
-# tracked in a public repository - one `git commit -a` from publishing the only
-# genuinely proprietary part of Nightjar. See memory/formatter.py.
-#
-# Imported softly on purpose. Without the engine package this is still a whole
-# voice keyboard: hold the key, speak, get text. Only lookups need what is
-# missing, and memory_enabled is already false when it is.
+# Composition is provided by the context engine package when it is installed.
+# Without it this is a voice keyboard, which is a complete thing on its own.
 try:
     from memory import formatter as _formatter
     from memory.formatter import (  # noqa: F401
